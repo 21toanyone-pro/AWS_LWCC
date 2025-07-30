@@ -13,16 +13,15 @@ def build_url(path):
     return url
 
 def weights_check(model_name, model_weights):
+    # 환경 변수 또는 홈 디렉토리를 기본 캐시 경로로 사용
+    cache_base_dir = os.environ.get('LWCC_CACHE_DIR', str(Path.home()))
+    weights_dir = os.path.join(cache_base_dir, 'weights')
     # create dir if does not exists
-    Path("/.lwcc/weights").mkdir(parents=True, exist_ok=True)
-
-    # download weights if not available
-    home = str(Path.home())
+    Path(weights_dir).mkdir(parents=True, exist_ok=True)
 
     file_name = "{}_{}.pth".format(model_name, model_weights)
     url = build_url(file_name)
-    output = os.path.join(home, "/.lwcc/weights/", file_name)
-    print(output)
+    output = os.path.join(weights_dir, file_name)
 
     if not os.path.isfile(output):
         print(file_name, " will be downloaded to ", output)
