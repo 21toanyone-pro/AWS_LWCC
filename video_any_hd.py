@@ -11,8 +11,6 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 import numpy as np
-from PIL import Image
-from torchvision import transforms
 import torch
 
 # LWCC 캐시 디렉토리를 홈 디렉토리로 설정
@@ -27,13 +25,27 @@ os.environ['LWCC_CACHE_DIR'] = lwcc_cache_dir
 os.environ['TORCH_HOME'] = lwcc_cache_dir
 os.environ['XDG_CACHE_HOME'] = lwcc_cache_dir
 
+# /.lwcc 디렉토리 접근 오류 방지
+try:
+    if not os.path.exists('/.lwcc'):
+        os.system(f'sudo mkdir -p /.lwcc && sudo chmod 777 /.lwcc')
+except:
+    pass
+
 from lwcc import LWCC
-# from lwcc.util.functions import load_image # 메모리 내 처리를 위해 더 이상 사용 안 함
+from lwcc.util.functions import load_image
 
 # ─── 글로벌 변수 ──────────────────────────────────────────────────
 HD_RESOLUTION = (1280, 720)  # HD 해상도
 model = None
 device = None
+
+# ─── CLI 설정 ──────────────────────────────────────────────────
+parser = argparse.ArgumentParser("HD LWCC Video Analyzer")
+parser.add_argument("--video-dir", default="video", help="비디오 파일이 있는 폴더")
+parser.add_argument("--output-dir", default="results_hd", help="결과 파일 저장 폴더")
+parser.add_argument("--use-gpu", action="store_true", help="GPU 사용")
+parser.add_argument("--temp-dir", default="/tmp", help="임시 파일 저장 경로")
 
 def initialize_model(use_gpu=False):
     """LWCC 모델 초기화"""
@@ -56,39 +68,28 @@ def initialize_model(use_gpu=False):
     model = LWCC.load_model(**mdl_kwargs).to(device).eval()
     print("✅ LWCC 모델 로딩 완료!")
 
-def analyze_frame_hd(frame, already_hd=False):
+def analyze_frame_hd(frame, frame_path):
     """
-    OpenCV 프레임을 HD 해상도로 리사이징 후 메모리에서 직접 인원수 분석
-    :param frame: 분석할 OpenCV 프레임
-    :param already_hd: 프레임이 이미 HD 해상도인지 여부
+    OpenCV 프레임을 HD 해상도로 리사이징 후 인원수 분석
     """
     try:
         start_time = time.time()
         
-        # 🎯 HD 해상도로 리사이징 (이미 HD가 아니면)
-        if not already_hd:
-            hd_frame = cv2.resize(frame, HD_RESOLUTION)
-        else:
-            hd_frame = frame
+        # 🎯 HD 해상도로 리사이징
+        original_height, original_width = frame.shape[:2]
+        hd_frame = cv2.resize(frame, HD_RESOLUTION)
         
-        # OpenCV 프레임(BGR)을 PIL 이미지(RGB)로 변환
-        pil_img = Image.fromarray(cv2.cvtColor(hd_frame, cv2.COLOR_BGR2RGB))
-
-        # lwcc.util.functions.load_image의 전처리 로직을 메모리에서 직접 수행
-        # 1. 리사이징 (라이브러리 기본 동작)
-        long = max(pil_img.size)
-        factor = 1000 / long
-        resized_img = pil_img.resize(
-            (int(pil_img.size[0] * factor), int(pil_img.size[1] * factor)),
-            Image.BILINEAR
+        # HD 프레임을 임시 파일로 저장
+        cv2.imwrite(frame_path, hd_frame)
+        
+        # LWCC로 HD 이미지 분석
+        img_tensor, _ = load_image(
+            frame_path,
+            "DM-Count",
+            is_gray=False,
+            resize_img=True
         )
-
-        # 2. 텐서 변환 및 정규화
-        trans = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-        img_tensor = trans(resized_img).unsqueeze(0).to(device)
+        img_tensor = img_tensor.to(device)
         
         # 추론
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
@@ -100,6 +101,12 @@ def analyze_frame_hd(frame, already_hd=False):
         
         end_time = time.time()
         processing_time = end_time - start_time
+        
+        # 임시 파일 삭제
+        try:
+            os.remove(frame_path)
+        except:
+            pass
         
         return count, processing_time
         
@@ -149,8 +156,11 @@ def analyze_video_hd(video_path, output_dir, temp_dir):
         if not ret:
             break
         
-        # HD 분석 (메모리에서 직접)
-        count, process_time = analyze_frame_hd(frame)
+        # 임시 파일 경로
+        temp_frame_path = f"{temp_dir}/temp_hd_frame_{video_name}_{second}.jpg"
+        
+        # HD 분석
+        count, process_time = analyze_frame_hd(frame, temp_frame_path)
         
         if count is not None:
             count_int = int(round(count))
@@ -235,17 +245,8 @@ def analyze_video_hd(video_path, output_dir, temp_dir):
         print(f"🔺 최대 인원수: {max_count:.1f}명")
         print(f"🔻 최소 인원수: {min_count:.1f}명")
         print(f"⏱️  평균 처리시간: {avg_process_time:.3f}초")
-        
-    return analysis_data # API에서 사용할 수 있도록 결과 반환
 
 def main():
-    # ─── CLI 설정 ──────────────────────────────────────────────────
-    parser = argparse.ArgumentParser("HD LWCC Video Analyzer")
-    parser.add_argument("--video-dir", default="video", help="비디오 파일이 있는 폴더")
-    parser.add_argument("--output-dir", default="results_hd", help="결과 파일 저장 폴더")
-    parser.add_argument("--use-gpu", action="store_true", help="GPU 사용")
-    parser.add_argument("--temp-dir", default="/tmp", help="임시 파일 저장 경로")
-
     args = parser.parse_args()
     
     print("🎯 HD LWCC 비디오 인원수 분석기")
