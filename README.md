@@ -44,7 +44,7 @@ AWS_LWCC/
 ### 1. 저장소 복제
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/21toanyone-pro/AWS_LWCC.git
 cd AWS_LWCC
 ```
 
