@@ -6,4 +6,5 @@ pillow>=8.0
 onnx
 onnxruntime
 onnxconverter-common
+python-dotenv>=1.0
 # For GPU, use: onnxruntime-gpu

@@ -256,5 +256,8 @@ $RECYCLE.BIN/
 *.pyc
 # Windows shortcuts
 *.lnk
+*.json
+*.pem
+*.ppk
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,macos,visualstudiocode,python
